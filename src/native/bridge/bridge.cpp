@@ -20403,7 +20403,7 @@ namespace
         metadata += ",\"brush_radius_texels\":" + std::to_string(tuning_brush_size_texels);
         metadata += ",\"brush_radius_uv\":" + std::to_string(brush_radius_uv);
         metadata += ",\"image_paint_brush_profile\":\"" +
-                    std::string(image_paint_enabled ? "professional_smooth_v1" : "legacy_hard_stamp") +
+                    std::string(image_paint_enabled ? "professional_smooth_v2" : "legacy_hard_stamp") +
                     "\"";
         metadata += ",\"image_paint_brush_hardness\":" +
                     std::to_string(static_cast<double>(base_brush.Hardness));

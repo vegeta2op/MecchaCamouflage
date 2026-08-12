@@ -3049,7 +3049,7 @@ int main()
         return 125;
     }
 
-    if (std::abs(runtime_contract::professional_image_coverage_step_texels(5.0) - 2.6) > 0.000001 ||
+    if (std::abs(runtime_contract::professional_image_coverage_step_texels(5.0) - 4.0) > 0.000001 ||
         runtime_contract::professional_image_coverage_step_texels(1.0) < 1.0)
     {
         return 201;

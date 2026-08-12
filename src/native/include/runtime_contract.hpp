@@ -4883,13 +4883,14 @@ namespace runtime_contract
     }
 
     // Image Paint used to stamp hard, non-overlapping circles on a lattice
-    // matching the brush diameter. That reads as a dotted/scalloped texture.
-    // Professional coverage keeps ~50% radial overlap so Smooth falloff can
-    // fuse neighboring dabs into a continuous painted surface.
-    constexpr float ProfessionalImageBrushHardness = 0.34f;
-    constexpr float ProfessionalImageBrushSpacing = 0.15f;
+    // matching the brush diameter. Soft Smooth falloff is enough to fuse
+    // neighboring dabs. Do not drop spacing below 1.0: the game interpolates
+    // extra stamps between consecutive PaintAtUV calls, and a 0.15 spacing
+    // with a denser lattice monopolizes the 4-calls-per-tick game thread.
+    constexpr float ProfessionalImageBrushHardness = 0.42f;
+    constexpr float ProfessionalImageBrushSpacing = 1.0f;
     constexpr float ProfessionalImageBrushOpacity = 1.0f;
-    constexpr double ProfessionalImageCoverageOverlap = 0.52;
+    constexpr double ProfessionalImageCoverageOverlap = 0.80;
 
     inline double professional_image_coverage_step_texels(double brush_size_texels)
     {

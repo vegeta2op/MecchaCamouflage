@@ -17199,7 +17199,15 @@ namespace
                                                                       (image_left_fill ? 1 : 0));
         metadata += ",\"brush_pipeline\":\"fill_single_brush\"";
         metadata += ",\"brush_size_texels\":" + std::to_string(tuning_brush_size_texels);
-        metadata += ",\"coverage_step_texels\":" + std::to_string(tuning_brush_size_texels);
+        const double planner_coverage_step_texels =
+            image_paint_enabled
+                ? runtime_contract::professional_image_coverage_step_texels(
+                      tuning_brush_size_texels)
+                : tuning_brush_size_texels;
+        metadata += ",\"coverage_step_texels\":" + std::to_string(planner_coverage_step_texels);
+        metadata += ",\"image_paint_coverage_mode\":\"" +
+                    std::string(image_paint_enabled ? "professional_overlap_v1" : "brush_lattice") +
+                    "\"";
         const double active_color_compression_tolerance =
             image_paint_enabled ? image_paint_color_compression_tolerance : tuning_color_compression_tolerance;
         metadata += ",\"color_compression_tolerance\":" +
@@ -18018,7 +18026,7 @@ namespace
                                                                  center_ray.location,
                                                                  camera_direction,
                                                                  region_axis,
-                                                                 tuning_brush_size_texels,
+                                                                 planner_coverage_step_texels,
                                                                  plan_samples,
                                                                  plan_stats,
                                                                  planner_failure);
@@ -18595,13 +18603,23 @@ namespace
                         image_v = image_coordinate.v;
                         sample.image_face_tile = image_coordinate.tile;
                     }
-                    const int x = std::max(0, std::min(image_paint_width - 1,
-                        static_cast<int>(std::round(clamp01(image_u) * static_cast<double>(image_paint_width - 1)))));
-                    const int y = std::max(0, std::min(image_paint_height - 1,
-                        static_cast<int>(std::round((1.0 - clamp01(image_v)) * static_cast<double>(image_paint_height - 1)))));
-                    const auto pixel = (static_cast<std::size_t>(y) * static_cast<std::size_t>(image_paint_width) +
-                                        static_cast<std::size_t>(x)) * 4;
-                    const auto alpha = image_paint_rgba[pixel + 3];
+                    const double sample_x =
+                        clamp01(image_u) * static_cast<double>(image_paint_width - 1);
+                    const double sample_y =
+                        (1.0 - clamp01(image_v)) *
+                        static_cast<double>(image_paint_height - 1);
+                    const auto sampled = runtime_contract::sample_rgba8_bilinear(
+                        image_paint_rgba.data(),
+                        image_paint_width,
+                        image_paint_height,
+                        sample_x,
+                        sample_y);
+                    if (!sampled.ok)
+                    {
+                        sample.unsafe = true;
+                        continue;
+                    }
+                    const auto alpha = static_cast<int>(std::lround(sampled.a * 255.0));
                     if ((image_paint_alpha_mode == "skip" && alpha < 128) ||
                         (image_paint_alpha_mode == "background" && alpha == 254))
                     {
@@ -18609,9 +18627,9 @@ namespace
                         ++chunk.transparent_skipped;
                         continue;
                     }
-                    sample.r = static_cast<double>(image_paint_rgba[pixel + 0]) / 255.0;
-                    sample.g = static_cast<double>(image_paint_rgba[pixel + 1]) / 255.0;
-                    sample.b = static_cast<double>(image_paint_rgba[pixel + 2]) / 255.0;
+                    sample.r = sampled.r;
+                    sample.g = sampled.g;
+                    sample.b = sampled.b;
                     sample.roughness = image_paint_roughness;
                     sample.metallic = image_paint_metallic;
                     ++chunk.assigned;
@@ -18671,7 +18689,7 @@ namespace
             metadata += ",\"image_paint_mapping_workers\":" + std::to_string(image_paint_mapping_workers);
             metadata += ",\"image_paint_mapping_parallel\":" +
                         std::string(json_bool(image_paint_mapping_workers > 1));
-            metadata += ",\"image_paint_mapping_mode\":\"canonical_profile_parallel\"";
+            metadata += ",\"image_paint_mapping_mode\":\"canonical_profile_bilinear_v1\"";
             metadata += ",\"image_paint_top_bottom_mode\":\"" + std::string(image_paint_cube ? "orthographic_side_projection" : "not_applicable") + "\"";
             metadata += ",\"image_paint_revision\":" + std::to_string(image_paint_revision);
             metadata += ",\"image_paint_brush_size_texels\":" + std::to_string(image_paint_brush_size_texels);
@@ -20312,7 +20330,7 @@ namespace
 
         metadata += ",";
         metadata += mesh_first_plan_stats_metadata(plan_stats);
-        metadata += ",\"planner_coverage_step_texels\":" + std::to_string(tuning_brush_size_texels);
+        metadata += ",\"planner_coverage_step_texels\":" + std::to_string(planner_coverage_step_texels);
         metadata += ",\"source_distance_policy\":\"" +
                     std::string(research_force_paint_color
                                     ? "research_constant_paint_color"
@@ -20357,10 +20375,20 @@ namespace
         safe_copy(&base_brush,
                   reinterpret_cast<const void*>(ctx.component + sdk::FieldOffsets::RuntimePaintable_CurrentBrushSettings),
                   sizeof(base_brush));
-        base_brush.Hardness = 1.0f;
-        base_brush.Opacity = 1.0f;
-        base_brush.Spacing = 1.0f;
-        base_brush.Falloff = sdk::EBrushFalloff::Spherical;
+        if (image_paint_enabled)
+        {
+            base_brush.Hardness = runtime_contract::ProfessionalImageBrushHardness;
+            base_brush.Opacity = runtime_contract::ProfessionalImageBrushOpacity;
+            base_brush.Spacing = runtime_contract::ProfessionalImageBrushSpacing;
+            base_brush.Falloff = sdk::EBrushFalloff::Smooth;
+        }
+        else
+        {
+            base_brush.Hardness = 1.0f;
+            base_brush.Opacity = 1.0f;
+            base_brush.Spacing = 1.0f;
+            base_brush.Falloff = sdk::EBrushFalloff::Spherical;
+        }
         base_brush.BlendMode = sdk::EPaintBlendMode::Normal;
         const double texture_size_double = static_cast<double>(std::max(1, active_texture_size));
         const double brush_radius_uv = tuning_brush_size_texels / texture_size_double;
@@ -20374,6 +20402,13 @@ namespace
             static_cast<float>(appearance_calibration_radius_uv);
         metadata += ",\"brush_radius_texels\":" + std::to_string(tuning_brush_size_texels);
         metadata += ",\"brush_radius_uv\":" + std::to_string(brush_radius_uv);
+        metadata += ",\"image_paint_brush_profile\":\"" +
+                    std::string(image_paint_enabled ? "professional_smooth_v1" : "legacy_hard_stamp") +
+                    "\"";
+        metadata += ",\"image_paint_brush_hardness\":" +
+                    std::to_string(static_cast<double>(base_brush.Hardness));
+        metadata += ",\"image_paint_brush_spacing\":" +
+                    std::to_string(static_cast<double>(base_brush.Spacing));
         const bool any_fill_region = image_paint_enabled
                                          ? any_image_fill_region
                                          : front_region_mode == MeshFirstRegionMode::Fill ||
@@ -23097,12 +23132,19 @@ namespace
             }
         }
         const auto plan_start = std::chrono::high_resolution_clock::now();
-        const auto adaptive_replay_plan = runtime_contract::build_adaptive_paint_plan(
+        auto adaptive_replay_plan = runtime_contract::build_adaptive_paint_plan(
             replay_plan.entries,
             adaptive_samples,
             brush_radius_uv,
             compression_enabled ? active_color_compression_tolerance : 0.0,
             0.8 / static_cast<double>(std::max(1, active_texture_size)));
+        if (image_paint_enabled)
+        {
+            runtime_contract::order_adaptive_entries_as_painterly_strokes(
+                adaptive_replay_plan.entries,
+                adaptive_samples,
+                brush_radius_uv * 2.15);
+        }
         const auto plan_end = std::chrono::high_resolution_clock::now();
         const double adaptive_plan_ms = std::chrono::duration<double, std::milli>(plan_end - plan_start).count();
         metadata += ",\"adaptive_plan_ms\":" + std::to_string(adaptive_plan_ms);
@@ -23146,6 +23188,9 @@ namespace
                     std::string(json_bool(adaptive_replay_plan.adaptive_plan_avx2_available));
         metadata += ",\"adaptive_plan_avx2_used\":" +
                     std::string(json_bool(adaptive_replay_plan.adaptive_plan_avx2_used));
+        metadata += ",\"image_paint_stroke_order\":\"" +
+                    std::string(image_paint_enabled ? "painterly_structure_v1" : "spatial_scanline") +
+                    "\"";
         const auto replay_materialize_started =
             std::chrono::steady_clock::now();
         for (const auto& adaptive_entry : adaptive_replay_plan.entries)

@@ -4882,6 +4882,383 @@ namespace runtime_contract
         return plan;
     }
 
+    // Image Paint used to stamp hard, non-overlapping circles on a lattice
+    // matching the brush diameter. That reads as a dotted/scalloped texture.
+    // Professional coverage keeps ~50% radial overlap so Smooth falloff can
+    // fuse neighboring dabs into a continuous painted surface.
+    constexpr float ProfessionalImageBrushHardness = 0.34f;
+    constexpr float ProfessionalImageBrushSpacing = 0.15f;
+    constexpr float ProfessionalImageBrushOpacity = 1.0f;
+    constexpr double ProfessionalImageCoverageOverlap = 0.52;
+
+    inline double professional_image_coverage_step_texels(double brush_size_texels)
+    {
+        const double brush = std::clamp(brush_size_texels, 1.0, 10.0);
+        return std::max(1.0, brush * ProfessionalImageCoverageOverlap);
+    }
+
+    struct Rgba8Sample
+    {
+        double r{0.0};
+        double g{0.0};
+        double b{0.0};
+        double a{0.0};
+        bool ok{false};
+    };
+
+    inline Rgba8Sample sample_rgba8_bilinear(
+        const std::uint8_t* data,
+        int width,
+        int height,
+        double x,
+        double y)
+    {
+        Rgba8Sample out{};
+        if (data == nullptr || width <= 0 || height <= 0 ||
+            !std::isfinite(x) || !std::isfinite(y))
+        {
+            return out;
+        }
+        const double max_x = static_cast<double>(width - 1);
+        const double max_y = static_cast<double>(height - 1);
+        x = std::clamp(x, 0.0, max_x);
+        y = std::clamp(y, 0.0, max_y);
+        const int x0 = static_cast<int>(std::floor(x));
+        const int y0 = static_cast<int>(std::floor(y));
+        const int x1 = std::min(width - 1, x0 + 1);
+        const int y1 = std::min(height - 1, y0 + 1);
+        const double tx = x - static_cast<double>(x0);
+        const double ty = y - static_cast<double>(y0);
+        const auto at = [&](int px, int py) -> const std::uint8_t* {
+            return data +
+                   (static_cast<std::size_t>(py) *
+                        static_cast<std::size_t>(width) +
+                    static_cast<std::size_t>(px)) *
+                       4;
+        };
+        const auto* c00 = at(x0, y0);
+        const auto* c10 = at(x1, y0);
+        const auto* c01 = at(x0, y1);
+        const auto* c11 = at(x1, y1);
+        const auto lerp_channel = [&](int channel) {
+            const double p00 = static_cast<double>(c00[channel]);
+            const double p10 = static_cast<double>(c10[channel]);
+            const double p01 = static_cast<double>(c01[channel]);
+            const double p11 = static_cast<double>(c11[channel]);
+            const double top = p00 + (p10 - p00) * tx;
+            const double bottom = p01 + (p11 - p01) * tx;
+            return (top + (bottom - top) * ty) / 255.0;
+        };
+        out.r = lerp_channel(0);
+        out.g = lerp_channel(1);
+        out.b = lerp_channel(2);
+        out.a = lerp_channel(3);
+        out.ok = true;
+        return out;
+    }
+
+    inline double painterly_luminance(double r, double g, double b)
+    {
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    }
+
+    // Reorder paint stamps into long, color-coherent polylines that follow
+    // local image structure (edge-tangent). Consecutive PaintAtUV calls then
+    // read as brush strokes instead of a printer-style lattice.
+    inline void order_adaptive_entries_as_painterly_strokes(
+        std::vector<AdaptiveReplayEntry>& entries,
+        const std::vector<AdaptivePaintSample>& samples,
+        double link_radius_uv)
+    {
+        if (entries.size() < 3 || samples.empty() ||
+            !std::isfinite(link_radius_uv) || link_radius_uv <= 0.000001)
+        {
+            return;
+        }
+        std::size_t paint_begin = 0;
+        while (paint_begin < entries.size() &&
+               entries[paint_begin].replay.pass != ReplayPass::Paint)
+        {
+            ++paint_begin;
+        }
+        const std::size_t paint_count = entries.size() - paint_begin;
+        if (paint_count < 3)
+        {
+            return;
+        }
+
+        struct PaintNode
+        {
+            std::size_t entry_index;
+            double u;
+            double v;
+            double r;
+            double g;
+            double b;
+            double lum;
+            int region;
+            int uv_island;
+            double dir_u;
+            double dir_v;
+            double gradient;
+        };
+
+        std::vector<PaintNode> nodes;
+        nodes.reserve(paint_count);
+        for (std::size_t i = paint_begin; i < entries.size(); ++i)
+        {
+            const auto sample_index = entries[i].replay.sample_index;
+            if (sample_index >= samples.size())
+            {
+                continue;
+            }
+            const auto& sample = samples[sample_index];
+            if (!sample.replay_relevant)
+            {
+                continue;
+            }
+            PaintNode node{};
+            node.entry_index = i;
+            node.u = sample.u;
+            node.v = sample.v;
+            node.r = sample.r;
+            node.g = sample.g;
+            node.b = sample.b;
+            node.lum = painterly_luminance(sample.r, sample.g, sample.b);
+            node.region = static_cast<int>(sample.region);
+            node.uv_island = sample.uv_island;
+            node.dir_u = 1.0;
+            node.dir_v = 0.0;
+            node.gradient = 0.0;
+            nodes.push_back(node);
+        }
+        if (nodes.size() < 3)
+        {
+            return;
+        }
+
+        const double radius = std::max(0.0005, link_radius_uv);
+        const int grid_size = std::clamp(
+            static_cast<int>(std::ceil(1.0 / radius)), 8, 256);
+        std::vector<std::vector<std::size_t>> grid(
+            static_cast<std::size_t>(grid_size * grid_size));
+        const auto cell_of = [&](double value) {
+            return std::clamp(
+                static_cast<int>(std::floor(std::clamp(value, 0.0, 1.0) *
+                                            static_cast<double>(grid_size))),
+                0,
+                grid_size - 1);
+        };
+        for (std::size_t i = 0; i < nodes.size(); ++i)
+        {
+            grid[static_cast<std::size_t>(
+                     cell_of(nodes[i].v) * grid_size + cell_of(nodes[i].u))]
+                .push_back(i);
+        }
+
+        const auto visit_neighbors = [&](std::size_t index, const auto& visit) {
+            const auto& node = nodes[index];
+            const int min_u = cell_of(node.u - radius);
+            const int max_u = cell_of(node.u + radius);
+            const int min_v = cell_of(node.v - radius);
+            const int max_v = cell_of(node.v + radius);
+            const double radius_squared = radius * radius;
+            for (int cell_v = min_v; cell_v <= max_v; ++cell_v)
+            {
+                for (int cell_u = min_u; cell_u <= max_u; ++cell_u)
+                {
+                    for (const auto other_index :
+                         grid[static_cast<std::size_t>(cell_v * grid_size +
+                                                       cell_u)])
+                    {
+                        if (other_index == index)
+                        {
+                            continue;
+                        }
+                        const auto& other = nodes[other_index];
+                        const double du = other.u - node.u;
+                        const double dv = other.v - node.v;
+                        if (du * du + dv * dv <= radius_squared)
+                        {
+                            visit(other_index, other);
+                        }
+                    }
+                }
+            }
+        };
+
+        for (std::size_t i = 0; i < nodes.size(); ++i)
+        {
+            double gx = 0.0;
+            double gy = 0.0;
+            visit_neighbors(i, [&](std::size_t, const PaintNode& other) {
+                const double du = other.u - nodes[i].u;
+                const double dv = other.v - nodes[i].v;
+                const double dist = std::sqrt(du * du + dv * dv);
+                if (dist <= 0.0000001)
+                {
+                    return;
+                }
+                const double dl = other.lum - nodes[i].lum;
+                gx += (du / dist) * dl;
+                gy += (dv / dist) * dl;
+            });
+            const double mag = std::sqrt(gx * gx + gy * gy);
+            nodes[i].gradient = mag;
+            if (mag > 0.000001)
+            {
+                // Stroke along the edge tangent (perpendicular to gradient).
+                nodes[i].dir_u = -gy / mag;
+                nodes[i].dir_v = gx / mag;
+            }
+        }
+
+        const auto color_ok = [&](const PaintNode& a, const PaintNode& b) {
+            if (a.region != b.region || a.uv_island != b.uv_island)
+            {
+                return false;
+            }
+            const double dr = a.r - b.r;
+            const double dg = a.g - b.g;
+            const double db = a.b - b.b;
+            return std::max(dr * dr, std::max(dg * dg, db * db)) <= 0.045 * 0.045;
+        };
+
+        std::vector<std::size_t> seed_order(nodes.size());
+        for (std::size_t i = 0; i < nodes.size(); ++i)
+        {
+            seed_order[i] = i;
+        }
+        std::stable_sort(
+            seed_order.begin(),
+            seed_order.end(),
+            [&](std::size_t left, std::size_t right) {
+                if (nodes[left].region != nodes[right].region)
+                {
+                    return nodes[left].region < nodes[right].region;
+                }
+                if (std::abs(nodes[left].gradient - nodes[right].gradient) >
+                    0.0000001)
+                {
+                    return nodes[left].gradient < nodes[right].gradient;
+                }
+                return nodes[left].lum < nodes[right].lum;
+            });
+
+        std::vector<char> used(nodes.size(), 0);
+        std::vector<std::size_t> chained;
+        chained.reserve(nodes.size());
+        const auto step_along = [&](std::size_t current,
+                                    double dir_u,
+                                    double dir_v) -> int {
+            int best = -1;
+            double best_score = -1.0;
+            visit_neighbors(current, [&](std::size_t other_index,
+                                         const PaintNode& other) {
+                if (used[other_index] || !color_ok(nodes[current], other))
+                {
+                    return;
+                }
+                const double du = other.u - nodes[current].u;
+                const double dv = other.v - nodes[current].v;
+                const double dist = std::sqrt(du * du + dv * dv);
+                if (dist <= 0.0000001)
+                {
+                    return;
+                }
+                const double alignment = (du * dir_u + dv * dir_v) / dist;
+                if (alignment < 0.35)
+                {
+                    return;
+                }
+                const double score = alignment - dist / (radius * 2.0);
+                if (score > best_score)
+                {
+                    best_score = score;
+                    best = static_cast<int>(other_index);
+                }
+            });
+            return best;
+        };
+
+        for (const auto seed : seed_order)
+        {
+            if (used[seed])
+            {
+                continue;
+            }
+            std::vector<std::size_t> forward;
+            std::vector<std::size_t> backward;
+            used[seed] = 1;
+            double dir_u = nodes[seed].dir_u;
+            double dir_v = nodes[seed].dir_v;
+            std::size_t current = seed;
+            for (int step = 0; step < 64; ++step)
+            {
+                const int next = step_along(current, dir_u, dir_v);
+                if (next < 0)
+                {
+                    break;
+                }
+                const auto next_index = static_cast<std::size_t>(next);
+                used[next_index] = 1;
+                forward.push_back(next_index);
+                dir_u = dir_u * 0.45 + nodes[next_index].dir_u * 0.55;
+                dir_v = dir_v * 0.45 + nodes[next_index].dir_v * 0.55;
+                const double mag = std::sqrt(dir_u * dir_u + dir_v * dir_v);
+                if (mag > 0.000001)
+                {
+                    dir_u /= mag;
+                    dir_v /= mag;
+                }
+                current = next_index;
+            }
+            dir_u = -nodes[seed].dir_u;
+            dir_v = -nodes[seed].dir_v;
+            current = seed;
+            for (int step = 0; step < 64; ++step)
+            {
+                const int next = step_along(current, dir_u, dir_v);
+                if (next < 0)
+                {
+                    break;
+                }
+                const auto next_index = static_cast<std::size_t>(next);
+                used[next_index] = 1;
+                backward.push_back(next_index);
+                dir_u = dir_u * 0.45 - nodes[next_index].dir_u * 0.55;
+                dir_v = dir_v * 0.45 - nodes[next_index].dir_v * 0.55;
+                const double mag = std::sqrt(dir_u * dir_u + dir_v * dir_v);
+                if (mag > 0.000001)
+                {
+                    dir_u /= mag;
+                    dir_v /= mag;
+                }
+                current = next_index;
+            }
+            for (auto it = backward.rbegin(); it != backward.rend(); ++it)
+            {
+                chained.push_back(*it);
+            }
+            chained.push_back(seed);
+            chained.insert(chained.end(), forward.begin(), forward.end());
+        }
+
+        std::vector<AdaptiveReplayEntry> reordered;
+        reordered.reserve(entries.size());
+        reordered.insert(reordered.end(),
+                         entries.begin(),
+                         entries.begin() + static_cast<std::ptrdiff_t>(paint_begin));
+        for (const auto node_index : chained)
+        {
+            reordered.push_back(entries[nodes[node_index].entry_index]);
+        }
+        if (reordered.size() == entries.size())
+        {
+            entries.swap(reordered);
+        }
+    }
+
     // A mesh can reuse UV islands.  When the game preserves triangle order,
     // every runtime triangle can still be verified against its profile index
     // without guessing which duplicate island owns the geometry.

@@ -1,0 +1,49 @@
+name: Forked Build 0.0.1
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - forked-build-0.0.1
+
+jobs:
+  build:
+    runs-on: windows-2022
+    env:
+      BUILD_VERSION: forked-build-0.0.1
+      EXE_NAME: forked-build-0.0.1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build runtime
+        shell: powershell
+        run: .\scripts\build.ps1 -Version $env:BUILD_VERSION -ExeName $env:EXE_NAME
+
+      - name: Package runtime
+        shell: powershell
+        run: |
+          $exePath = ".build/bin/$env:EXE_NAME.exe"
+          if (-not (Test-Path $exePath)) { throw "forked exe missing: $exePath" }
+          New-Item -ItemType Directory -Force -Path ".build/package" | Out-Null
+          Copy-Item -Force $exePath ".build/package/forked-build-0.0.1.exe"
+          .\scripts\release.ps1 -Version $env:BUILD_VERSION -ExePath $exePath
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: forked-build-0.0.1
+          path: .build/package/forked-build-0.0.1.exe

@@ -3049,6 +3049,69 @@ int main()
         return 125;
     }
 
+    if (std::abs(runtime_contract::professional_image_coverage_step_texels(5.0) - 2.6) > 0.000001 ||
+        runtime_contract::professional_image_coverage_step_texels(1.0) < 1.0)
+    {
+        return 201;
+    }
+    {
+        const std::uint8_t pixels[]{
+            255, 0, 0, 255,
+            0, 255, 0, 255,
+            0, 0, 255, 255,
+            255, 255, 255, 255};
+        const auto center = runtime_contract::sample_rgba8_bilinear(pixels, 2, 2, 0.5, 0.5);
+        const auto corner = runtime_contract::sample_rgba8_bilinear(pixels, 2, 2, 0.0, 0.0);
+        if (!center.ok || !corner.ok ||
+            std::abs(corner.r - 1.0) > 0.000001 ||
+            std::abs(corner.g) > 0.000001 ||
+            std::abs(center.r - 0.5) > 0.000001 ||
+            std::abs(center.g - 0.5) > 0.000001 ||
+            std::abs(center.b - 0.5) > 0.000001)
+        {
+            return 202;
+        }
+    }
+    {
+        std::vector<runtime_contract::AdaptivePaintSample> stroke_samples{
+            {0.10, 0.10, runtime_contract::ReplayRegion::Front, 0, 0.80, 0.20, 0.20, true, true, 1},
+            {0.12, 0.10, runtime_contract::ReplayRegion::Front, 0, 0.80, 0.20, 0.20, true, true, 1},
+            {0.14, 0.10, runtime_contract::ReplayRegion::Front, 0, 0.80, 0.20, 0.20, true, true, 1},
+            {0.80, 0.80, runtime_contract::ReplayRegion::Front, 0, 0.10, 0.80, 0.10, true, true, 1},
+        };
+        std::vector<runtime_contract::AdaptiveReplayEntry> stroke_entries{
+            {{0, runtime_contract::ReplayPass::Paint, runtime_contract::ReplayRegion::Front, {0, 0.0, 0}}, 1.0},
+            {{3, runtime_contract::ReplayPass::Paint, runtime_contract::ReplayRegion::Front, {0, 1.0, 3}}, 1.0},
+            {{1, runtime_contract::ReplayPass::Paint, runtime_contract::ReplayRegion::Front, {0, 2.0, 1}}, 1.0},
+            {{2, runtime_contract::ReplayPass::Paint, runtime_contract::ReplayRegion::Front, {0, 3.0, 2}}, 1.0},
+        };
+        runtime_contract::order_adaptive_entries_as_painterly_strokes(
+            stroke_entries, stroke_samples, 0.05);
+        if (stroke_entries.size() != 4)
+        {
+            return 203;
+        }
+        const auto index_of = [&](std::size_t sample_index) {
+            for (std::size_t i = 0; i < stroke_entries.size(); ++i)
+            {
+                if (stroke_entries[i].replay.sample_index == sample_index)
+                {
+                    return static_cast<int>(i);
+                }
+            }
+            return -1;
+        };
+        const int red0 = index_of(0);
+        const int red1 = index_of(1);
+        const int red2 = index_of(2);
+        const int red_min = std::min(red0, std::min(red1, red2));
+        const int red_max = std::max(red0, std::max(red1, red2));
+        if (red0 < 0 || red1 < 0 || red2 < 0 || red_max - red_min != 2)
+        {
+            return 204;
+        }
+    }
+
     if (runtime_contract::esp_capture_status(
             false, false, 0, false) !=
             runtime_contract::EspCaptureStatus::Disabled ||

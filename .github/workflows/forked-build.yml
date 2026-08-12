@@ -31,13 +31,21 @@ jobs:
 
       - name: Build runtime
         shell: powershell
-        run: .\scripts\build.ps1 -Version $env:BUILD_VERSION -ExeName $env:EXE_NAME
+        run: .\scripts\build.ps1 -Version $env:BUILD_VERSION -ExeName "$env:EXE_NAME.exe"
 
       - name: Package runtime
         shell: powershell
         run: |
           $exePath = ".build/bin/$env:EXE_NAME.exe"
-          if (-not (Test-Path $exePath)) { throw "forked exe missing: $exePath" }
+          if (-not (Test-Path $exePath)) {
+            $exePath = Get-ChildItem ".build/bin/*.exe" -File |
+              Where-Object { $_.Name -like "forked-build*" -or $_.Name -eq "meccha-camouflage.exe" } |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $exePath -or -not (Test-Path $exePath)) {
+            Get-ChildItem ".build/bin" -ErrorAction SilentlyContinue | Format-Table Name, Length
+            throw "forked exe missing: .build/bin/$env:EXE_NAME.exe"
+          }
           New-Item -ItemType Directory -Force -Path ".build/package" | Out-Null
           Copy-Item -Force $exePath ".build/package/forked-build-0.0.1.exe"
           .\scripts\release.ps1 -Version $env:BUILD_VERSION -ExePath $exePath

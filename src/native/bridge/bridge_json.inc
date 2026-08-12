@@ -440,6 +440,8 @@
                  "image_paint_brush_profile",
                  "image_paint_brush_hardness",
                  "image_paint_brush_spacing",
+                 "image_paint_lattice_mode",
+                 "image_paint_apply_mode",
                  "image_paint_stroke_order",
                  "image_paint_candidate_ms",
                  "image_paint_candidate_mode",

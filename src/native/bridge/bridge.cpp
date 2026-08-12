@@ -11460,6 +11460,7 @@ namespace
                                                              const sdk::FVector& camera_direction,
                                                              char region_axis,
                                                              double coverage_step_texels,
+                                                             bool hexagonal_lattice,
                                                              std::vector<MeshFirstPlanSample>& samples,
                                                              MeshFirstPlanStats& stats,
                                                              std::string& failure) -> bool
@@ -11576,9 +11577,12 @@ namespace
             const double max_v = clamp01(std::max({triangle.uv[0].Y, triangle.uv[1].Y, triangle.uv[2].Y}));
             const double start_u = std::floor(min_u / step_uv) * step_uv + step_uv * 0.5;
             const double start_v = std::floor(min_v / step_uv) * step_uv + step_uv * 0.5;
-            for (double v = start_v; v <= max_v + step_uv * 0.25; v += step_uv)
+            int lattice_row = 0;
+            for (double v = start_v; v <= max_v + step_uv * 0.25; v += step_uv, ++lattice_row)
             {
-                for (double u = start_u; u <= max_u + step_uv * 0.25; u += step_uv)
+                const double row_offset =
+                    hexagonal_lattice && (lattice_row & 1) != 0 ? step_uv * 0.5 : 0.0;
+                for (double u = start_u + row_offset; u <= max_u + step_uv * 0.25; u += step_uv)
                 {
                     double a = 0.0;
                     double b = 0.0;
@@ -17206,7 +17210,7 @@ namespace
                 : tuning_brush_size_texels;
         metadata += ",\"coverage_step_texels\":" + std::to_string(planner_coverage_step_texels);
         metadata += ",\"image_paint_coverage_mode\":\"" +
-                    std::string(image_paint_enabled ? "professional_overlap_v1" : "brush_lattice") +
+                    std::string(image_paint_enabled ? "professional_hex_overlap_v3" : "brush_lattice") +
                     "\"";
         const double active_color_compression_tolerance =
             image_paint_enabled ? image_paint_color_compression_tolerance : tuning_color_compression_tolerance;
@@ -18027,6 +18031,7 @@ namespace
                                                                  camera_direction,
                                                                  region_axis,
                                                                  planner_coverage_step_texels,
+                                                                 image_paint_enabled,
                                                                  plan_samples,
                                                                  plan_stats,
                                                                  planner_failure);
@@ -18073,6 +18078,7 @@ namespace
                         camera_direction,
                         region_axis,
                         kAppearanceCalibrationStepTexels,
+                        false,
                         calibration_samples,
                         appearance_calibration_plan_stats,
                         calibration_failure))
@@ -20391,7 +20397,12 @@ namespace
         }
         base_brush.BlendMode = sdk::EPaintBlendMode::Normal;
         const double texture_size_double = static_cast<double>(std::max(1, active_texture_size));
-        const double brush_radius_uv = tuning_brush_size_texels / texture_size_double;
+        const double stamp_radius_texels =
+            image_paint_enabled
+                ? runtime_contract::professional_image_stamp_radius_texels(
+                      tuning_brush_size_texels)
+                : tuning_brush_size_texels;
+        const double brush_radius_uv = stamp_radius_texels / texture_size_double;
         sdk::FRuntimeBrushSettings paint_brush = base_brush;
         paint_brush.Radius = static_cast<float>(brush_radius_uv);
         const double appearance_calibration_radius_uv =
@@ -20400,15 +20411,21 @@ namespace
             base_brush;
         appearance_calibration_brush.Radius =
             static_cast<float>(appearance_calibration_radius_uv);
-        metadata += ",\"brush_radius_texels\":" + std::to_string(tuning_brush_size_texels);
+        metadata += ",\"brush_radius_texels\":" + std::to_string(stamp_radius_texels);
         metadata += ",\"brush_radius_uv\":" + std::to_string(brush_radius_uv);
         metadata += ",\"image_paint_brush_profile\":\"" +
-                    std::string(image_paint_enabled ? "professional_smooth_v2" : "legacy_hard_stamp") +
+                    std::string(image_paint_enabled ? "professional_smooth_v3" : "legacy_hard_stamp") +
                     "\"";
         metadata += ",\"image_paint_brush_hardness\":" +
                     std::to_string(static_cast<double>(base_brush.Hardness));
         metadata += ",\"image_paint_brush_spacing\":" +
                     std::to_string(static_cast<double>(base_brush.Spacing));
+        metadata += ",\"image_paint_lattice_mode\":\"" +
+                    std::string(image_paint_enabled ? "hexagonal_v1" : "square") +
+                    "\"";
+        metadata += ",\"image_paint_apply_mode\":\"" +
+                    std::string(image_paint_enabled ? "alpha_blend" : "override") +
+                    "\"";
         const bool any_fill_region = image_paint_enabled
                                          ? any_image_fill_region
                                          : front_region_mode == MeshFirstRegionMode::Fill ||
@@ -23297,7 +23314,9 @@ namespace
                 }
                 const auto apply_mode = research_apply_mode >= 0
                                             ? static_cast<sdk::EPaintChannelApplyMode>(research_apply_mode)
-                                            : sdk::EPaintChannelApplyMode::Override;
+                                            : (image_paint_enabled
+                                                   ? sdk::EPaintChannelApplyMode::AlphaBlend
+                                                   : sdk::EPaintChannelApplyMode::Override);
                 channel = sdk_make_channel(stroke_r,
                                            stroke_g,
                                            stroke_b,

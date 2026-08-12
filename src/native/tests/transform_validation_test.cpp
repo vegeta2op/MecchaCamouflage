@@ -3049,8 +3049,10 @@ int main()
         return 125;
     }
 
-    if (std::abs(runtime_contract::professional_image_coverage_step_texels(5.0) - 4.0) > 0.000001 ||
-        runtime_contract::professional_image_coverage_step_texels(1.0) < 1.0)
+    if (std::abs(runtime_contract::professional_image_coverage_step_texels(5.0) - 3.5) > 0.000001 ||
+        runtime_contract::professional_image_coverage_step_texels(1.0) < 1.0 ||
+        std::abs(runtime_contract::professional_image_stamp_radius_texels(5.0) - 7.25) > 0.000001 ||
+        runtime_contract::professional_image_stamp_radius_texels(10.0) > 10.000001)
     {
         return 201;
     }

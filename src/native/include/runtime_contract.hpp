@@ -4882,20 +4882,29 @@ namespace runtime_contract
         return plan;
     }
 
-    // Image Paint used to stamp hard, non-overlapping circles on a lattice
-    // matching the brush diameter. Soft Smooth falloff is enough to fuse
-    // neighboring dabs. Do not drop spacing below 1.0: the game interpolates
-    // extra stamps between consecutive PaintAtUV calls, and a 0.15 spacing
-    // with a denser lattice monopolizes the 4-calls-per-tick game thread.
-    constexpr float ProfessionalImageBrushHardness = 0.42f;
+    // Image Paint reconstructs the canvas as overlapping dabs. A square
+    // lattice at ~80% of the brush diameter leaves diagonal holes, and
+    // Override+hard stamps make every dab a visible colored square.
+    // Fuse neighboring colors with a soft AlphaBlend stamp that is larger
+    // than the lattice step. Keep spacing at 1.0: values below 1.0 make
+    // the game interpolate extra dabs between consecutive PaintAtUV calls
+    // and monopolize the 4-calls-per-tick game thread.
+    constexpr float ProfessionalImageBrushHardness = 0.18f;
     constexpr float ProfessionalImageBrushSpacing = 1.0f;
     constexpr float ProfessionalImageBrushOpacity = 1.0f;
-    constexpr double ProfessionalImageCoverageOverlap = 0.80;
+    constexpr double ProfessionalImageCoverageOverlap = 0.70;
+    constexpr double ProfessionalImageStampRadiusScale = 1.45;
 
     inline double professional_image_coverage_step_texels(double brush_size_texels)
     {
         const double brush = std::clamp(brush_size_texels, 1.0, 10.0);
         return std::max(1.0, brush * ProfessionalImageCoverageOverlap);
+    }
+
+    inline double professional_image_stamp_radius_texels(double brush_size_texels)
+    {
+        const double brush = std::clamp(brush_size_texels, 1.0, 10.0);
+        return std::min(10.0, brush * ProfessionalImageStampRadiusScale);
     }
 
     struct Rgba8Sample

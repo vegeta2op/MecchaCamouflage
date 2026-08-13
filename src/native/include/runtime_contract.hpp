@@ -4882,23 +4882,23 @@ namespace runtime_contract
         return plan;
     }
 
-    // Close-range auto-paint (environment and Image Paint) reconstructs the
-    // surface as a dense hexagonal field of soft overlapping dabs. A square
-    // lattice at the brush diameter is a visible point grid at arm's length,
-    // and 8x compression widening turns nearby gradients into blotches.
-    // Keep spacing at 1.0: values below 1.0 make the game interpolate extra
-    // dabs between consecutive PaintAtUV calls and monopolize the
-    // 4-calls-per-tick game thread.
-    constexpr float CloseRangeBrushHardness = 0.12f;
+    // Close-range auto-paint reconstructs the captured / imported texture
+    // at about one texel. A 5-texel brush used as both step and radius
+    // paints 12-texel discs of a single sample color — that is the mosaic
+    // anyone can see at arm's length. Keep spacing at 1.0: values below
+    // 1.0 make the game interpolate extra dabs between consecutive
+    // PaintAtUV calls and monopolize the 4-calls-per-tick game thread.
+    constexpr float CloseRangeBrushHardness = 0.0f;
     constexpr float CloseRangeBrushSpacing = 1.0f;
-    constexpr float CloseRangeBrushOpacity = 1.0f;
-    constexpr double CloseRangeCoverageOverlap = 0.45;
-    constexpr double CloseRangeStampRadiusScale = 1.20;
+    constexpr float CloseRangeBrushOpacity = 0.82f;
+    constexpr double CloseRangeCoverageOverlap = 0.20;
+    constexpr double CloseRangeStampRadiusOverStep = 1.85;
+    constexpr double CloseRangeMinStampRadiusTexels = 1.65;
     constexpr float ProfessionalImageBrushHardness = CloseRangeBrushHardness;
     constexpr float ProfessionalImageBrushSpacing = CloseRangeBrushSpacing;
     constexpr float ProfessionalImageBrushOpacity = CloseRangeBrushOpacity;
     constexpr double ProfessionalImageCoverageOverlap = CloseRangeCoverageOverlap;
-    constexpr double ProfessionalImageStampRadiusScale = CloseRangeStampRadiusScale;
+    constexpr double ProfessionalImageStampRadiusScale = CloseRangeStampRadiusOverStep;
 
     inline double close_range_coverage_step_texels(double brush_size_texels)
     {
@@ -4908,8 +4908,11 @@ namespace runtime_contract
 
     inline double close_range_stamp_radius_texels(double brush_size_texels)
     {
-        const double brush = std::clamp(brush_size_texels, 1.0, 10.0);
-        return std::min(10.0, brush * CloseRangeStampRadiusScale);
+        const double step = close_range_coverage_step_texels(brush_size_texels);
+        return std::min(
+            10.0,
+            std::max(CloseRangeMinStampRadiusTexels,
+                     step * CloseRangeStampRadiusOverStep));
     }
 
     inline double close_range_hex_row_offset_uv(double step_uv, int lattice_row)

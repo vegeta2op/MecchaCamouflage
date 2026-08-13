@@ -17217,8 +17217,8 @@ namespace
             runtime_contract::close_range_coverage_step_texels(
                 tuning_brush_size_texels);
         metadata += ",\"coverage_step_texels\":" + std::to_string(planner_coverage_step_texels);
-        metadata += ",\"image_paint_coverage_mode\":\"close_range_hex_overlap_v1\"";
-        metadata += ",\"paint_stamp_profile\":\"close_range_hex_soft_v1\"";
+        metadata += ",\"image_paint_coverage_mode\":\"close_range_texel_blend_v1\"";
+        metadata += ",\"paint_stamp_profile\":\"close_range_texel_blend_v1\"";
         const double requested_color_compression_tolerance =
             image_paint_enabled ? image_paint_color_compression_tolerance : tuning_color_compression_tolerance;
         const double active_color_compression_tolerance =
@@ -20414,18 +20414,14 @@ namespace
         metadata += ",\"brush_radius_uv\":" + std::to_string(brush_radius_uv);
         metadata += ",\"stamp_radius_texels\":" + std::to_string(stamp_radius_texels);
         metadata += ",\"lattice_mode\":\"hexagonal_v1\"";
-        metadata += ",\"apply_mode\":\"" +
-                    std::string(image_paint_enabled ? "alpha_blend" : "override") +
-                    "\"";
-        metadata += ",\"image_paint_brush_profile\":\"close_range_smooth_v1\"";
+        metadata += ",\"apply_mode\":\"alpha_blend\"";
+        metadata += ",\"image_paint_brush_profile\":\"close_range_texel_blend_v1\"";
         metadata += ",\"image_paint_brush_hardness\":" +
                     std::to_string(static_cast<double>(base_brush.Hardness));
         metadata += ",\"image_paint_brush_spacing\":" +
                     std::to_string(static_cast<double>(base_brush.Spacing));
         metadata += ",\"image_paint_lattice_mode\":\"hexagonal_v1\"";
-        metadata += ",\"image_paint_apply_mode\":\"" +
-                    std::string(image_paint_enabled ? "alpha_blend" : "override") +
-                    "\"";
+        metadata += ",\"image_paint_apply_mode\":\"alpha_blend\"";
         const bool any_fill_region = image_paint_enabled
                                          ? any_image_fill_region
                                          : front_region_mode == MeshFirstRegionMode::Fill ||
@@ -20439,6 +20435,9 @@ namespace
         const double fill_cell_uv = fill_stroke_radius_uv * 0.75;
         sdk::FRuntimeBrushSettings fill_brush = paint_brush;
         fill_brush.Radius = static_cast<float>(fill_stroke_radius_uv);
+        fill_brush.Hardness = 1.0f;
+        fill_brush.Opacity = 1.0f;
+        fill_brush.Falloff = sdk::EBrushFalloff::Spherical;
         metadata += ",\"fill_stroke_radius_source\":\"fixed_100_texels\"";
         metadata += ",\"fill_stroke_radius_texels\":" + std::to_string(fill_stroke_radius_texels);
         metadata += ",\"fill_stroke_radius_uv\":" + std::to_string(fill_stroke_radius_uv);
@@ -20973,7 +20972,10 @@ namespace
                 0.8 / static_cast<double>(std::max(1, active_texture_size)));
             std::vector<sdk::FPaintStroke> out{};
             out.reserve(preview_plan.entries.size());
-            const auto apply_mode = research_apply_mode >= 0
+            const auto preview_paint_apply_mode = research_apply_mode >= 0
+                                        ? static_cast<sdk::EPaintChannelApplyMode>(research_apply_mode)
+                                        : sdk::EPaintChannelApplyMode::AlphaBlend;
+            const auto preview_fill_apply_mode = research_apply_mode >= 0
                                         ? static_cast<sdk::EPaintChannelApplyMode>(research_apply_mode)
                                         : sdk::EPaintChannelApplyMode::Override;
             for (const auto& adaptive_entry : preview_plan.entries)
@@ -20990,7 +20992,7 @@ namespace
                                                fill_metallic,
                                                fill_roughness,
                                                fill_emissive,
-                                               apply_mode);
+                                               preview_fill_apply_mode);
                 }
                 else
                 {
@@ -21015,7 +21017,7 @@ namespace
                                                sample.appearance_metallic,
                                                sample.appearance_roughness,
                                                sample.appearance_emissive,
-                                               apply_mode);
+                                               preview_paint_apply_mode);
                 }
                 auto brush = fill_mode
                                  ? fill_brush
@@ -23155,13 +23157,10 @@ namespace
             brush_radius_uv,
             compression_enabled ? active_color_compression_tolerance : 0.0,
             0.8 / static_cast<double>(std::max(1, active_texture_size)));
-        if (image_paint_enabled)
-        {
-            runtime_contract::order_adaptive_entries_as_painterly_strokes(
-                adaptive_replay_plan.entries,
-                adaptive_samples,
-                brush_radius_uv * 2.15);
-        }
+        runtime_contract::order_adaptive_entries_as_painterly_strokes(
+            adaptive_replay_plan.entries,
+            adaptive_samples,
+            brush_radius_uv * 2.15);
         const auto plan_end = std::chrono::high_resolution_clock::now();
         const double adaptive_plan_ms = std::chrono::duration<double, std::milli>(plan_end - plan_start).count();
         metadata += ",\"adaptive_plan_ms\":" + std::to_string(adaptive_plan_ms);
@@ -23209,9 +23208,7 @@ namespace
                     std::string(json_bool(adaptive_replay_plan.adaptive_plan_avx2_available));
         metadata += ",\"adaptive_plan_avx2_used\":" +
                     std::string(json_bool(adaptive_replay_plan.adaptive_plan_avx2_used));
-        metadata += ",\"image_paint_stroke_order\":\"" +
-                    std::string(image_paint_enabled ? "painterly_structure_v1" : "spatial_scanline") +
-                    "\"";
+        metadata += ",\"image_paint_stroke_order\":\"painterly_structure_v1\"";
         const auto replay_materialize_started =
             std::chrono::steady_clock::now();
         for (const auto& adaptive_entry : adaptive_replay_plan.entries)
@@ -23318,9 +23315,7 @@ namespace
                 }
                 const auto apply_mode = research_apply_mode >= 0
                                             ? static_cast<sdk::EPaintChannelApplyMode>(research_apply_mode)
-                                            : (image_paint_enabled
-                                                   ? sdk::EPaintChannelApplyMode::AlphaBlend
-                                                   : sdk::EPaintChannelApplyMode::Override);
+                                            : sdk::EPaintChannelApplyMode::AlphaBlend;
                 channel = sdk_make_channel(stroke_r,
                                            stroke_g,
                                            stroke_b,

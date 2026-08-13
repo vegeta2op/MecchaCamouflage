@@ -23,7 +23,7 @@
             <section class="settings-tab-panel" data-settings-panel="paint">
             <div class="settings-group">
             <div class="group-title" data-i18n="group.brush">Brush</div>
-            <p class="hint" style="margin:0 0 8px;opacity:.75;font-size:12px">Auto-paint uses a dense hex field of soft stamps so the skin reads as a texture up close. The body bulge stays. Larger brush = smoother / faster; smaller = more detail / longer.</p>
+            <p class="hint" style="margin:0 0 8px;opacity:.75;font-size:12px">Auto-paint copies the texture at about one texel with soft blended stamps. The body bulge stays. Larger brush = a bit faster / softer; default 5 is the close-range setting.</p>
             <div class="setting-grid">
               <label class="field app-wide">
                 <span data-i18n="brush.size">Brush size</span>
@@ -141,7 +141,7 @@
                 </div>
                 <div class="settings-group" id="image-brush-section">
                   <div class="group-title" data-i18n="group.brush">Brush</div>
-                  <p class="hint" style="margin:0 0 8px;opacity:.75;font-size:12px">Image Paint uses the same close-range hex stamps as auto-paint. Larger brush = smoother / faster; smaller = more detail / longer.</p>
+                  <p class="hint" style="margin:0 0 8px;opacity:.75;font-size:12px">Image Paint uses the same one-texel blended stamps as auto-paint so the imported texture stays sharp up close.</p>
                   <div class="setting-grid">
                     <label class="field app-wide"><span data-i18n="brush.size">Brush size</span><div class="range-row"><input id="image-brush-size" class="image-edit-control" type="range" min="1" max="10" step="0.5" value="5"><input id="image-brush-size-number" class="image-edit-control range-number" type="number" min="1" max="10" step="0.5" value="5"></div></label>
                     <label class="field app-wide"><span data-i18n="color.compression.tolerance">Color compression tolerance</span><div class="range-row"><input id="image-color-compression-tolerance" class="image-edit-control" type="range" min="0" max="10" step="0.5" value="0"><input id="image-color-compression-tolerance-number" class="image-edit-control range-number" type="number" min="0" max="10" step="0.5" value="0"></div></label>

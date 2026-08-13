@@ -152,14 +152,17 @@ appearance-calibration samples do not participate in final replay
 compression. New settings default to a 5-texel brush with Front `Skip` and
 Side / Back `Paint`.
 
-Production paint stamps use a shared close-range profile for environment
-auto-paint and Image Paint: hexagonal UV lattice, coverage step
-`0.45 × brush`, stamp radius `1.20 × brush`, hardness `0.12`, Smooth
-falloff, and spacing `1.0`. Spacing below `1.0` makes the game interpolate
-extra dabs between consecutive `PaintAtUVWithBrush` calls and stalls the
-4-calls-per-tick game thread. Environment stamps stay `Override`; Image
-Paint stays `AlphaBlend`. Do not jitter stamp UVs and do not Bayer-dither
-colors: both recreate a visible dotted field at close range.
+Production paint stamps reconstruct the texture at about one texel, not
+as a field of large discs. The shared close-range profile for environment
+auto-paint and Image Paint is: hexagonal UV lattice, coverage step
+`max(1, 0.20 × brush)` (1.0 texel at the default 5-texel brush), stamp
+radius `1.85 × step`, hardness `0`, opacity `0.82`, Smooth falloff,
+`AlphaBlend`, and spacing `1.0`. A 5-texel radius paints a 10-texel blob
+of one sample color; that is the mosaic visible at arm's length. Spacing
+below `1.0` makes the game interpolate extra dabs between consecutive
+`PaintAtUVWithBrush` calls and stalls the 4-calls-per-tick game thread.
+Fill stays a hard `Override` 100-texel pass. Do not jitter stamp UVs and
+do not Bayer-dither colors: both recreate a visible dotted field.
 
 The reflected `PaintAtUVWithBrush` schema is a fatal requirement. If it is
 unavailable, stop before painting; do not silently switch to texture import or

@@ -3049,12 +3049,38 @@ int main()
         return 125;
     }
 
-    if (std::abs(runtime_contract::professional_image_coverage_step_texels(5.0) - 3.5) > 0.000001 ||
-        runtime_contract::professional_image_coverage_step_texels(1.0) < 1.0 ||
-        std::abs(runtime_contract::professional_image_stamp_radius_texels(5.0) - 7.25) > 0.000001 ||
-        runtime_contract::professional_image_stamp_radius_texels(10.0) > 10.000001)
+    if (std::abs(runtime_contract::close_range_coverage_step_texels(5.0) - 2.25) > 0.000001 ||
+        runtime_contract::close_range_coverage_step_texels(1.0) < 1.0 ||
+        std::abs(runtime_contract::close_range_stamp_radius_texels(5.0) - 6.0) > 0.000001 ||
+        runtime_contract::close_range_stamp_radius_texels(10.0) > 10.000001 ||
+        std::abs(runtime_contract::professional_image_coverage_step_texels(5.0) -
+                 runtime_contract::close_range_coverage_step_texels(5.0)) > 0.000001 ||
+        std::abs(runtime_contract::close_range_hex_row_offset_uv(0.01, 0)) > 0.000001 ||
+        std::abs(runtime_contract::close_range_hex_row_offset_uv(0.01, 1) - 0.005) > 0.000001 ||
+        std::abs(runtime_contract::close_range_hex_row_offset_uv(0.01, 3) - 0.005) > 0.000001 ||
+        runtime_contract::close_range_paint_compression_tolerance(false, 5.0) != 0.0 ||
+        std::abs(runtime_contract::close_range_paint_compression_tolerance(true, 5.0) - 5.0) >
+            0.000001)
     {
         return 201;
+    }
+    {
+        const auto environment_plan = runtime_contract::build_adaptive_paint_plan(
+            large_flat_compression_entries,
+            large_flat_compression_samples,
+            0.02,
+            runtime_contract::close_range_paint_compression_tolerance(false, 5.0));
+        if (environment_plan.expanded_paint_entries != 0)
+        {
+            return 205;
+        }
+        for (const auto& entry : environment_plan.entries)
+        {
+            if (entry.radius_multiplier > 1.000001)
+            {
+                return 205;
+            }
+        }
     }
     {
         const std::uint8_t pixels[]{

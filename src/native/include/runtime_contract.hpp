@@ -4882,29 +4882,67 @@ namespace runtime_contract
         return plan;
     }
 
-    // Image Paint reconstructs the canvas as overlapping dabs. A square
-    // lattice at ~80% of the brush diameter leaves diagonal holes, and
-    // Override+hard stamps make every dab a visible colored square.
-    // Fuse neighboring colors with a soft AlphaBlend stamp that is larger
-    // than the lattice step. Keep spacing at 1.0: values below 1.0 make
-    // the game interpolate extra dabs between consecutive PaintAtUV calls
-    // and monopolize the 4-calls-per-tick game thread.
-    constexpr float ProfessionalImageBrushHardness = 0.18f;
-    constexpr float ProfessionalImageBrushSpacing = 1.0f;
-    constexpr float ProfessionalImageBrushOpacity = 1.0f;
-    constexpr double ProfessionalImageCoverageOverlap = 0.70;
-    constexpr double ProfessionalImageStampRadiusScale = 1.45;
+    // Close-range auto-paint (environment and Image Paint) reconstructs the
+    // surface as a dense hexagonal field of soft overlapping dabs. A square
+    // lattice at the brush diameter is a visible point grid at arm's length,
+    // and 8x compression widening turns nearby gradients into blotches.
+    // Keep spacing at 1.0: values below 1.0 make the game interpolate extra
+    // dabs between consecutive PaintAtUV calls and monopolize the
+    // 4-calls-per-tick game thread.
+    constexpr float CloseRangeBrushHardness = 0.12f;
+    constexpr float CloseRangeBrushSpacing = 1.0f;
+    constexpr float CloseRangeBrushOpacity = 1.0f;
+    constexpr double CloseRangeCoverageOverlap = 0.45;
+    constexpr double CloseRangeStampRadiusScale = 1.20;
+    constexpr float ProfessionalImageBrushHardness = CloseRangeBrushHardness;
+    constexpr float ProfessionalImageBrushSpacing = CloseRangeBrushSpacing;
+    constexpr float ProfessionalImageBrushOpacity = CloseRangeBrushOpacity;
+    constexpr double ProfessionalImageCoverageOverlap = CloseRangeCoverageOverlap;
+    constexpr double ProfessionalImageStampRadiusScale = CloseRangeStampRadiusScale;
+
+    inline double close_range_coverage_step_texels(double brush_size_texels)
+    {
+        const double brush = std::clamp(brush_size_texels, 1.0, 10.0);
+        return std::max(1.0, brush * CloseRangeCoverageOverlap);
+    }
+
+    inline double close_range_stamp_radius_texels(double brush_size_texels)
+    {
+        const double brush = std::clamp(brush_size_texels, 1.0, 10.0);
+        return std::min(10.0, brush * CloseRangeStampRadiusScale);
+    }
+
+    inline double close_range_hex_row_offset_uv(double step_uv, int lattice_row)
+    {
+        if (!std::isfinite(step_uv) || step_uv <= 0.0)
+        {
+            return 0.0;
+        }
+        return (lattice_row & 1) != 0 ? step_uv * 0.5 : 0.0;
+    }
+
+    // Environment stamps keep the exact captured color. Widening them
+    // recreates the close-range dotted / blotchy field. Image Paint may
+    // still compress when the user asks for it.
+    inline double close_range_paint_compression_tolerance(
+        bool image_paint,
+        double requested_tolerance)
+    {
+        if (!image_paint)
+        {
+            return 0.0;
+        }
+        return std::clamp(requested_tolerance, 0.0, 10.0);
+    }
 
     inline double professional_image_coverage_step_texels(double brush_size_texels)
     {
-        const double brush = std::clamp(brush_size_texels, 1.0, 10.0);
-        return std::max(1.0, brush * ProfessionalImageCoverageOverlap);
+        return close_range_coverage_step_texels(brush_size_texels);
     }
 
     inline double professional_image_stamp_radius_texels(double brush_size_texels)
     {
-        const double brush = std::clamp(brush_size_texels, 1.0, 10.0);
-        return std::min(10.0, brush * ProfessionalImageStampRadiusScale);
+        return close_range_stamp_radius_texels(brush_size_texels);
     }
 
     struct Rgba8Sample

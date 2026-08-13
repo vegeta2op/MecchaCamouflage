@@ -1,17 +1,17 @@
-name: Forked Build 0.0.2
+name: Forked Build 0.0.3
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - forked-build-0.0.2
+      - forked-build-0.0.3
 
 jobs:
   build:
     runs-on: windows-2022
     env:
-      BUILD_VERSION: forked-build-0.0.2
-      EXE_NAME: forked-build-0.0.2
+      BUILD_VERSION: forked-build-0.0.3
+      EXE_NAME: forked-build-0.0.3
 
     steps:
       - name: Checkout
@@ -47,11 +47,11 @@ jobs:
             throw "forked exe missing: .build/bin/$env:EXE_NAME.exe"
           }
           New-Item -ItemType Directory -Force -Path ".build/package" | Out-Null
-          Copy-Item -Force $exePath ".build/package/forked-build-0.0.2.exe"
+          Copy-Item -Force $exePath ".build/package/forked-build-0.0.3.exe"
           .\scripts\release.ps1 -Version $env:BUILD_VERSION -ExePath $exePath
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: forked-build-0.0.2
-          path: .build/package/forked-build-0.0.2.exe
+          name: forked-build-0.0.3
+          path: .build/package/forked-build-0.0.3.exe

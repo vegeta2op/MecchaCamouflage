@@ -140,7 +140,10 @@ Color compression is a planner-only optimization for the single Paint pass.
 At a nonzero tolerance it may widen and coalesce strokes only within one
 region, UV island, safe sample set, and final material payload; Fill is never
 compressed. Its supported range is `0` through `10` (default `5`); `0`
-disables widening. Nonzero compression uses a brush-aligned coverage field:
+disables widening. Environment auto-paint ignores that tolerance and never
+widens: close-range camouflage has to keep the captured color on a dense
+hex lattice. Image Paint may still compress when the user sets a nonzero
+value. Nonzero compression uses a brush-aligned coverage field:
 empty, skipped, unsafe, conflicting PBR, region, and UV-island cells stop
 expansion. A deterministic circle-covering phase reduces overlap on flat
 fields, and each emitted stroke uses the per-channel minimax colour of its
@@ -148,6 +151,15 @@ coverage instead of whichever sample happened to be visited first. Fixed
 appearance-calibration samples do not participate in final replay
 compression. New settings default to a 5-texel brush with Front `Skip` and
 Side / Back `Paint`.
+
+Production paint stamps use a shared close-range profile for environment
+auto-paint and Image Paint: hexagonal UV lattice, coverage step
+`0.45 × brush`, stamp radius `1.20 × brush`, hardness `0.12`, Smooth
+falloff, and spacing `1.0`. Spacing below `1.0` makes the game interpolate
+extra dabs between consecutive `PaintAtUVWithBrush` calls and stalls the
+4-calls-per-tick game thread. Environment stamps stay `Override`; Image
+Paint stays `AlphaBlend`. Do not jitter stamp UVs and do not Bayer-dither
+colors: both recreate a visible dotted field at close range.
 
 The reflected `PaintAtUVWithBrush` schema is a fatal requirement. If it is
 unavailable, stop before painting; do not silently switch to texture import or

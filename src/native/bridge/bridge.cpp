@@ -11487,7 +11487,13 @@ namespace
         }
         const double texture_size_double = static_cast<double>(std::max(1, texture_size));
         const double step_uv = clamp_range(coverage_step_texels, 1.0, 64.0) / texture_size_double;
-        samples.reserve(std::min<std::size_t>(static_cast<std::size_t>(std::max(1, expected_triangles)) * 8, 100000));
+        const std::size_t samples_per_triangle =
+            hexagonal_lattice ? 32 : 8;
+        samples.reserve(
+            std::min<std::size_t>(
+                static_cast<std::size_t>(std::max(1, expected_triangles)) *
+                    samples_per_triangle,
+                400000));
 
         for (std::size_t tri = 0; tri < static_cast<std::size_t>(expected_triangles); ++tri)
         {
@@ -11581,7 +11587,11 @@ namespace
             for (double v = start_v; v <= max_v + step_uv * 0.25; v += step_uv, ++lattice_row)
             {
                 const double row_offset =
-                    hexagonal_lattice && (lattice_row & 1) != 0 ? step_uv * 0.5 : 0.0;
+                    hexagonal_lattice
+                        ? runtime_contract::close_range_hex_row_offset_uv(
+                              step_uv,
+                              lattice_row)
+                        : 0.0;
                 for (double u = start_u + row_offset; u <= max_u + step_uv * 0.25; u += step_uv)
                 {
                     double a = 0.0;
@@ -17204,16 +17214,17 @@ namespace
         metadata += ",\"brush_pipeline\":\"fill_single_brush\"";
         metadata += ",\"brush_size_texels\":" + std::to_string(tuning_brush_size_texels);
         const double planner_coverage_step_texels =
-            image_paint_enabled
-                ? runtime_contract::professional_image_coverage_step_texels(
-                      tuning_brush_size_texels)
-                : tuning_brush_size_texels;
+            runtime_contract::close_range_coverage_step_texels(
+                tuning_brush_size_texels);
         metadata += ",\"coverage_step_texels\":" + std::to_string(planner_coverage_step_texels);
-        metadata += ",\"image_paint_coverage_mode\":\"" +
-                    std::string(image_paint_enabled ? "professional_hex_overlap_v3" : "brush_lattice") +
-                    "\"";
-        const double active_color_compression_tolerance =
+        metadata += ",\"image_paint_coverage_mode\":\"close_range_hex_overlap_v1\"";
+        metadata += ",\"paint_stamp_profile\":\"close_range_hex_soft_v1\"";
+        const double requested_color_compression_tolerance =
             image_paint_enabled ? image_paint_color_compression_tolerance : tuning_color_compression_tolerance;
+        const double active_color_compression_tolerance =
+            runtime_contract::close_range_paint_compression_tolerance(
+                image_paint_enabled,
+                requested_color_compression_tolerance);
         metadata += ",\"color_compression_tolerance\":" +
                     std::to_string(active_color_compression_tolerance);
         metadata +=
@@ -18031,7 +18042,7 @@ namespace
                                                                  camera_direction,
                                                                  region_axis,
                                                                  planner_coverage_step_texels,
-                                                                 image_paint_enabled,
+                                                                 true,
                                                                  plan_samples,
                                                                  plan_stats,
                                                                  planner_failure);
@@ -20381,27 +20392,15 @@ namespace
         safe_copy(&base_brush,
                   reinterpret_cast<const void*>(ctx.component + sdk::FieldOffsets::RuntimePaintable_CurrentBrushSettings),
                   sizeof(base_brush));
-        if (image_paint_enabled)
-        {
-            base_brush.Hardness = runtime_contract::ProfessionalImageBrushHardness;
-            base_brush.Opacity = runtime_contract::ProfessionalImageBrushOpacity;
-            base_brush.Spacing = runtime_contract::ProfessionalImageBrushSpacing;
-            base_brush.Falloff = sdk::EBrushFalloff::Smooth;
-        }
-        else
-        {
-            base_brush.Hardness = 1.0f;
-            base_brush.Opacity = 1.0f;
-            base_brush.Spacing = 1.0f;
-            base_brush.Falloff = sdk::EBrushFalloff::Spherical;
-        }
+        base_brush.Hardness = runtime_contract::CloseRangeBrushHardness;
+        base_brush.Opacity = runtime_contract::CloseRangeBrushOpacity;
+        base_brush.Spacing = runtime_contract::CloseRangeBrushSpacing;
+        base_brush.Falloff = sdk::EBrushFalloff::Smooth;
         base_brush.BlendMode = sdk::EPaintBlendMode::Normal;
         const double texture_size_double = static_cast<double>(std::max(1, active_texture_size));
         const double stamp_radius_texels =
-            image_paint_enabled
-                ? runtime_contract::professional_image_stamp_radius_texels(
-                      tuning_brush_size_texels)
-                : tuning_brush_size_texels;
+            runtime_contract::close_range_stamp_radius_texels(
+                tuning_brush_size_texels);
         const double brush_radius_uv = stamp_radius_texels / texture_size_double;
         sdk::FRuntimeBrushSettings paint_brush = base_brush;
         paint_brush.Radius = static_cast<float>(brush_radius_uv);
@@ -20413,16 +20412,17 @@ namespace
             static_cast<float>(appearance_calibration_radius_uv);
         metadata += ",\"brush_radius_texels\":" + std::to_string(stamp_radius_texels);
         metadata += ",\"brush_radius_uv\":" + std::to_string(brush_radius_uv);
-        metadata += ",\"image_paint_brush_profile\":\"" +
-                    std::string(image_paint_enabled ? "professional_smooth_v3" : "legacy_hard_stamp") +
+        metadata += ",\"stamp_radius_texels\":" + std::to_string(stamp_radius_texels);
+        metadata += ",\"lattice_mode\":\"hexagonal_v1\"";
+        metadata += ",\"apply_mode\":\"" +
+                    std::string(image_paint_enabled ? "alpha_blend" : "override") +
                     "\"";
+        metadata += ",\"image_paint_brush_profile\":\"close_range_smooth_v1\"";
         metadata += ",\"image_paint_brush_hardness\":" +
                     std::to_string(static_cast<double>(base_brush.Hardness));
         metadata += ",\"image_paint_brush_spacing\":" +
                     std::to_string(static_cast<double>(base_brush.Spacing));
-        metadata += ",\"image_paint_lattice_mode\":\"" +
-                    std::string(image_paint_enabled ? "hexagonal_v1" : "square") +
-                    "\"";
+        metadata += ",\"image_paint_lattice_mode\":\"hexagonal_v1\"";
         metadata += ",\"image_paint_apply_mode\":\"" +
                     std::string(image_paint_enabled ? "alpha_blend" : "override") +
                     "\"";
@@ -20849,11 +20849,11 @@ namespace
             previous_region = entry.region;
             previous_spatial_key = entry.spatial_key;
         }
-        const bool compression_requested = active_color_compression_tolerance > 0.0;
-        // Appearance Match encodes the quantized AMRE payload in material_key,
-        // so adaptive widening remains safe even when neighbouring samples
-        // have the same albedo but different emissive/roughness/metallic.
-        const bool compression_enabled = compression_requested;
+        const bool compression_requested = requested_color_compression_tolerance > 0.0;
+        // Environment close-range stamps must keep the captured color. Image
+        // Paint may still widen when the user sets a nonzero tolerance.
+        const bool compression_enabled =
+            image_paint_enabled && active_color_compression_tolerance > 0.0;
         const bool appearance_feedback_payload_ready =
             manual_color_feedback_requested;
         const auto compression_color =
@@ -23172,7 +23172,11 @@ namespace
         metadata += ",\"color_compression_disabled_reason\":\"" +
                     std::string(!compression_requested
                                     ? "tolerance_zero"
-                                    : (compression_enabled ? "" : "disabled")) +
+                                    : (compression_enabled
+                                           ? ""
+                                           : (image_paint_enabled
+                                                  ? "disabled"
+                                                  : "environment_close_range"))) +
                     "\"";
         metadata += ",\"color_compression_expanded_strokes\":" +
                     std::to_string(adaptive_replay_plan.expanded_paint_entries);
